@@ -452,14 +452,13 @@ namespace CustomControls
                         var rowTop = startRect.Top + startRect.Height - 10; // position near bottom of cell
                         var barRect = Rectangle.FromLTRB(startRect.Left + 2, rowTop, endRect.Right - 2, rowTop + 8);
 
-                        using (var barPath = RoundedRect(barRect, 4))
                         using (var barBrush = new SolidBrush(t.Color.IsEmpty ? TaskDefaultColor : t.Color))
                         using (var barPen = new Pen(Color.FromArgb(220, 220, 220), 1))
                         using (var textBrush = new SolidBrush(Color.FromArgb(20, 20, 20)))
                         using (var sf = new StringFormat { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter })
                         {
-                            g.FillPath(barBrush, barPath);
-                            g.DrawPath(barPen, barPath);
+                            g.FillRectangle(barBrush, barRect);
+                            g.DrawRectangle(barPen, barRect);
 
                             if (!string.IsNullOrEmpty(t.Text))
                             {
@@ -473,18 +472,6 @@ namespace CustomControls
                     cursor = segEnd.AddDays(1);
                 }
             }
-        }
-
-        private static GraphicsPath RoundedRect(Rectangle bounds, int radius)
-        {
-            int d = radius * 2;
-            var path = new GraphicsPath();
-            path.AddArc(bounds.X, bounds.Y, d, d, 180, 90);
-            path.AddArc(bounds.Right - d, bounds.Y, d, d, 270, 90);
-            path.AddArc(bounds.Right - d, bounds.Bottom - d, d, d, 0, 90);
-            path.AddArc(bounds.X, bounds.Bottom - d, d, d, 90, 90);
-            path.CloseFigure();
-            return path;
         }
 
         #endregion

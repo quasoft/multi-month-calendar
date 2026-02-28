@@ -10,27 +10,29 @@ using System.Windows.Forms;
 namespace CustomControls
 {
     /// <summary>
-    /// A dark-themed, multi-month WinForms calendar that adapts to available space,
+    /// A dark-themed, continuous-week WinForms calendar that displays weeks vertically,
     /// supports highlighting specific dates, and rendering task spans across date ranges.
     /// .NET Framework 4.6.1 compatible.
     /// </summary>
     [DefaultEvent("DateClicked")]
     public class MultiMonthCalendar : Control
     {
-        private const int HeaderHeight = 28;
-        private const int DowHeight = 20;
-        private const int CellGap = 2;
-        private const int MonthPadding = 10;
+        private const int DowHeight = 24;
+        private const int TaskBarHeight = 8;
+        private const int TaskBarSpacing = 2;
+        private const int ControlPadding = 10;
 
-        private int _minMonthWidth = 240;
-        private int _minMonthHeight = 200;
+        private int _minWeekRowHeight = 40;
+        private int _weeksToDisplay = 12;
 
-        private DateTime _startMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+        private DateTime _startDate = GetMondayOfWeek(DateTime.Today);
         private readonly HashSet<DateTime> _highlighted = new HashSet<DateTime>();
         private readonly List<TaskSpan> _tasks = new List<TaskSpan>();
 
         private ToolTip _tooltip;
         private DateTime? _hoverDate;
+        private VScrollBar _vScrollBar;
+        private int _scrollWeekOffset = 0;
 
         public MultiMonthCalendar()
         {
@@ -49,30 +51,44 @@ namespace CustomControls
 
             _tooltip = new ToolTip { IsBalloon = false, UseFading = true, UseAnimation = true, AutoPopDelay = 8000, InitialDelay = 400, ReshowDelay = 200 };
 
+            _vScrollBar = new VScrollBar { Dock = DockStyle.Right, Visible = true };
+            _vScrollBar.Scroll += VScrollBar_Scroll;
+            Controls.Add(_vScrollBar);
+
             MouseWheel += MultiMonthCalendar_MouseWheel;
             MouseMove += MultiMonthCalendar_MouseMove;
             MouseLeave += (s, e) => { _hoverDate = null; _tooltip.Hide(this); Invalidate(); };
         }
 
+        private static DateTime GetMondayOfWeek(DateTime date)
+        {
+            var culture = CultureInfo.CurrentCulture;
+            var fdow = culture.DateTimeFormat.FirstDayOfWeek;
+            int diff = ((int)date.DayOfWeek - (int)fdow + 7) % 7;
+            return date.AddDays(-diff).Date;
+        }
+
         #region Public API
 
-        [Category("Layout"), Description("Minimum width of a single month panel.")]
-        public int MinMonthWidth
+        [Category("Layout"), Description("Minimum height for a week row (without task bars).")]
+        public int MinWeekRowHeight
         {
-            get => _minMonthWidth; set { _minMonthWidth = Math.Max(160, value); Invalidate(); }
+            get => _minWeekRowHeight;
+            set { _minWeekRowHeight = Math.Max(30, value); Invalidate(); }
         }
 
-        [Category("Layout"), Description("Minimum height of a single month panel.")]
-        public int MinMonthHeight
+        [Category("Behavior"), Description("Number of weeks to display in the view.")]
+        public int WeeksToDisplay
         {
-            get => _minMonthHeight; set { _minMonthHeight = Math.Max(160, value); Invalidate(); }
+            get => _weeksToDisplay;
+            set { _weeksToDisplay = Math.Max(1, value); UpdateScrollBar(); Invalidate(); }
         }
 
-        [Category("Behavior"), Description("The first (top-left) month shown.")]
-        public DateTime StartMonth
+        [Category("Behavior"), Description("The first week's starting date (Monday).")]
+        public DateTime StartDate
         {
-            get => _startMonth;
-            set { _startMonth = new DateTime(value.Year, value.Month, 1); Invalidate(); }
+            get => _startDate;
+            set { _startDate = GetMondayOfWeek(value); UpdateScrollBar(); Invalidate(); }
         }
 
         [Category("Appearance"), Description("Header background color.")]
@@ -95,8 +111,8 @@ namespace CustomControls
 
         public struct TaskSpan
         {
-            public DateTime Start;   // inclusive date component
-            public DateTime End;     // inclusive date component
+            public DateTime Start;
+            public DateTime End;
             public Color Color;
             public string Text;
 
@@ -130,6 +146,7 @@ namespace CustomControls
         public void AddTask(TaskSpan task)
         {
             _tasks.Add(task);
+            UpdateScrollBar();
             Invalidate();
         }
 
@@ -140,12 +157,14 @@ namespace CustomControls
         {
             _tasks.Clear();
             _tasks.AddRange(tasks ?? Enumerable.Empty<TaskSpan>());
+            UpdateScrollBar();
             Invalidate();
         }
 
         public void ClearTasks()
         {
             _tasks.Clear();
+            UpdateScrollBar();
             Invalidate();
         }
 
@@ -168,111 +187,161 @@ namespace CustomControls
 
         #region Layout helpers
 
-        private struct MonthLayout
+        private struct WeekLayout
         {
-            public DateTime Month;
+            public DateTime WeekStart;
             public Rectangle Bounds;
-            public Rectangle GridBounds;
-            public Size CellSize;
+            public int BaseHeight;
+            public int TaskAreaHeight;
+            public List<int> TaskRowsForWeek;
         }
 
-        private List<MonthLayout> ComputeLayout(Graphics g)
+        private List<int> AssignTaskRows()
         {
-            var layouts = new List<MonthLayout>();
+            var taskRows = new List<int>();
+            var sortedIndices = Enumerable.Range(0, _tasks.Count)
+                .OrderBy(i => _tasks[i].Start)
+                .ThenBy(i => _tasks[i].End)
+                .ToList();
+            
+            for (int idx = 0; idx < _tasks.Count; idx++)
+            {
+                taskRows.Add(-1);
+            }
+            
+            foreach (var taskIndex in sortedIndices)
+            {
+                var task = _tasks[taskIndex];
+                int row = 0;
+                bool placed = false;
+                
+                while (!placed)
+                {
+                    bool hasConflict = false;
+                    for (int i = 0; i < _tasks.Count; i++)
+                    {
+                        if (i == taskIndex || taskRows[i] < 0 || taskRows[i] != row) continue;
+                        
+                        var other = _tasks[i];
+                        if (!(task.End < other.Start || task.Start > other.End))
+                        {
+                            hasConflict = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!hasConflict)
+                    {
+                        taskRows[taskIndex] = row;
+                        placed = true;
+                    }
+                    else
+                    {
+                        row++;
+                    }
+                }
+            }
+            
+            return taskRows;
+        }
+
+        private List<WeekLayout> ComputeWeekLayouts()
+        {
+            var layouts = new List<WeekLayout>();
             if (ClientSize.Width <= 0 || ClientSize.Height <= 0) return layouts;
 
-            int cols = Math.Max(1, ClientSize.Width / (_minMonthWidth + MonthPadding));
-            int rows = Math.Max(1, ClientSize.Height / (_minMonthHeight + MonthPadding));
-            int total = cols * rows;
+            var taskRows = AssignTaskRows();
+            int contentWidth = ClientSize.Width - _vScrollBar.Width - ControlPadding * 2;
+            int cellW = Math.Max(30, contentWidth / 7);
 
-            int monthWidth = ClientSize.Width / cols;
-            int monthHeight = ClientSize.Height / rows;
+            int yPos = ControlPadding + DowHeight;
+            DateTime weekStart = _startDate.AddDays(_scrollWeekOffset * 7);
 
-            var month = _startMonth;
-            for (int r = 0; r < rows; r++)
+            for (int w = 0; w < _weeksToDisplay; w++)
             {
-                for (int c = 0; c < cols; c++)
+                var currentWeekStart = weekStart.AddDays(w * 7);
+                var currentWeekEnd = currentWeekStart.AddDays(6);
+
+                // Find max task row for this week
+                int maxTaskRow = -1;
+                var weekTaskIndices = new List<int>();
+                
+                for (int i = 0; i < _tasks.Count; i++)
                 {
-                    var x = c * monthWidth;
-                    var y = r * monthHeight;
-                    var bounds = new Rectangle(x, y, monthWidth, monthHeight);
-
-                    // Calculate grid area inside month panel
-                    int contentLeft = bounds.Left + MonthPadding;
-                    int contentTop = bounds.Top + MonthPadding + HeaderHeight + DowHeight;
-                    int contentWidth = bounds.Width - MonthPadding * 2;
-                    int contentHeight = bounds.Height - MonthPadding * 2 - HeaderHeight - DowHeight;
-
-                    // 7 columns, 6 rows
-                    int cellW = Math.Max(16, (contentWidth - (7 - 1) * CellGap) / 7);
-                    int cellH = Math.Max(16, (contentHeight - (6 - 1) * CellGap) / 6);
-
-                    var grid = new Rectangle(contentLeft, contentTop, cellW * 7 + CellGap * 6, cellH * 6 + CellGap * 5);
-
-                    layouts.Add(new MonthLayout
+                    if (taskRows[i] < 0) continue;
+                    var t = _tasks[i];
+                    
+                    if (!(t.End < currentWeekStart || t.Start > currentWeekEnd))
                     {
-                        Month = month,
-                        Bounds = bounds,
-                        GridBounds = grid,
-                        CellSize = new Size(cellW, cellH)
-                    });
-
-                    month = month.AddMonths(1);
+                        weekTaskIndices.Add(i);
+                        maxTaskRow = Math.Max(maxTaskRow, taskRows[i]);
+                    }
                 }
+
+                int taskAreaHeight = maxTaskRow >= 0 ? (maxTaskRow + 1) * (TaskBarHeight + TaskBarSpacing) : 0;
+                int totalHeight = _minWeekRowHeight + taskAreaHeight;
+
+                var bounds = new Rectangle(ControlPadding, yPos, cellW * 7, totalHeight);
+
+                layouts.Add(new WeekLayout
+                {
+                    WeekStart = currentWeekStart,
+                    Bounds = bounds,
+                    BaseHeight = _minWeekRowHeight,
+                    TaskAreaHeight = taskAreaHeight,
+                    TaskRowsForWeek = taskRows
+                });
+
+                yPos += totalHeight + 1;
             }
 
             return layouts;
         }
 
-        private Rectangle GetDateCellRect(MonthLayout layout, DateTime date)
+        private Rectangle GetDateCellRect(WeekLayout layout, DateTime date)
         {
-            // date must be in the same displayed month
-            if (date.Year != layout.Month.Year || date.Month != layout.Month.Month) return Rectangle.Empty;
+            if (date < layout.WeekStart || date > layout.WeekStart.AddDays(6))
+                return Rectangle.Empty;
 
-            var first = new DateTime(layout.Month.Year, layout.Month.Month, 1);
             var culture = CultureInfo.CurrentCulture;
-            var firstDayOfWeek = culture.DateTimeFormat.FirstDayOfWeek;
+            var fdow = culture.DateTimeFormat.FirstDayOfWeek;
+            int dayOffset = ((int)date.DayOfWeek - (int)fdow + 7) % 7;
 
-            int offset = ((int)first.DayOfWeek - (int)firstDayOfWeek + 7) % 7;
-            int index = (date.Day - 1) + offset; // zero-based index into grid
-            int row = index / 7;
-            int col = index % 7;
-
-            var x = layout.GridBounds.Left + col * (layout.CellSize.Width + CellGap);
-            var y = layout.GridBounds.Top + row * (layout.CellSize.Height + CellGap);
-            return new Rectangle(x, y, layout.CellSize.Width, layout.CellSize.Height);
+            int cellW = layout.Bounds.Width / 7;
+            var x = layout.Bounds.Left + dayOffset * cellW;
+            var y = layout.Bounds.Top;
+            
+            return new Rectangle(x, y, cellW, layout.Bounds.Height);
         }
 
         private DateTime? HitTest(Point p)
         {
-            using (var g = CreateGraphics())
+            foreach (var wl in ComputeWeekLayouts())
             {
-                foreach (var ml in ComputeLayout(g))
+                if (!wl.Bounds.Contains(p)) continue;
+
+                int cellW = wl.Bounds.Width / 7;
+                for (int col = 0; col < 7; col++)
                 {
-                    if (!ml.Bounds.Contains(p)) continue;
-
-                    // Iterate cells
-                    var first = new DateTime(ml.Month.Year, ml.Month.Month, 1);
-                    var daysInMonth = DateTime.DaysInMonth(ml.Month.Year, ml.Month.Month);
-                    var culture = CultureInfo.CurrentCulture;
-                    var fdow = culture.DateTimeFormat.FirstDayOfWeek;
-                    int offset = ((int)first.DayOfWeek - (int)fdow + 7) % 7;
-
-                    for (int d = 1; d <= daysInMonth; d++)
+                    var cellRect = new Rectangle(wl.Bounds.Left + col * cellW, wl.Bounds.Top, cellW, wl.Bounds.Height);
+                    if (cellRect.Contains(p))
                     {
-                        int idx = (d - 1) + offset;
-                        int row = idx / 7; int col = idx % 7;
-                        var cell = new Rectangle(
-                            ml.GridBounds.Left + col * (ml.CellSize.Width + CellGap),
-                            ml.GridBounds.Top + row * (ml.CellSize.Height + CellGap),
-                            ml.CellSize.Width,
-                            ml.CellSize.Height);
-                        if (cell.Contains(p))
-                            return new DateTime(ml.Month.Year, ml.Month.Month, d);
+                        return wl.WeekStart.AddDays(col);
                     }
                 }
             }
             return null;
+        }
+
+        private void UpdateScrollBar()
+        {
+            if (_vScrollBar == null) return;
+            
+            int totalWeeks = 52;
+            _vScrollBar.Maximum = Math.Max(0, totalWeeks - _weeksToDisplay + _vScrollBar.LargeChange - 1);
+            _vScrollBar.LargeChange = Math.Max(1, _weeksToDisplay / 2);
+            _vScrollBar.SmallChange = 1;
+            _vScrollBar.Value = Math.Min(_scrollWeekOffset, _vScrollBar.Maximum);
         }
 
         #endregion
@@ -286,192 +355,165 @@ namespace CustomControls
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
-            using (var bg = new SolidBrush(BackColor)) g.FillRectangle(bg, ClientRectangle);
+            using (var bg = new SolidBrush(BackColor))
+                g.FillRectangle(bg, ClientRectangle);
 
-            var layouts = ComputeLayout(g);
-            foreach (var ml in layouts)
+            DrawDayOfWeekHeader(g);
+
+            var layouts = ComputeWeekLayouts();
+            foreach (var wl in layouts)
             {
-                DrawMonthPanel(g, ml);
+                DrawWeekRow(g, wl);
             }
         }
 
-        private void DrawMonthPanel(Graphics g, MonthLayout ml)
-        {
-            // Outer panel border (subtle)
-            using (var borderPen = new Pen(GridLineColor))
-            using (var headerBg = new SolidBrush(HeaderBackColor))
-            using (var headerAccent = new SolidBrush(AccentColor))
-            using (var textBrush = new SolidBrush(ForeColor))
-            using (var gridPen = new Pen(GridLineColor))
-            {
-                g.DrawRectangle(borderPen, ml.Bounds.X, ml.Bounds.Y, ml.Bounds.Width - 1, ml.Bounds.Height - 1);
-
-                // Header
-                var headerRect = new Rectangle(ml.Bounds.Left + MonthPadding, ml.Bounds.Top + MonthPadding, ml.Bounds.Width - MonthPadding * 2, HeaderHeight);
-                g.FillRectangle(headerBg, headerRect);
-
-                string title = new DateTime(ml.Month.Year, ml.Month.Month, 1).ToString("Y", CultureInfo.CurrentCulture);
-                var titleSize = g.MeasureString(title, Font);
-                var titlePt = new PointF(headerRect.Left + 6, headerRect.Top + (headerRect.Height - titleSize.Height) / 2f);
-                g.DrawString(title, Font, headerAccent, titlePt);
-
-                // Day of week header
-                var dowRect = new Rectangle(headerRect.Left, headerRect.Bottom, headerRect.Width, DowHeight);
-                DrawDayOfWeek(g, dowRect);
-
-                // Grid background
-                DrawDateGrid(g, ml);
-
-                // Draw tasks over grid
-                DrawTasks(g, ml);
-            }
-        }
-
-        private void DrawDayOfWeek(Graphics g, Rectangle rect)
+        private void DrawDayOfWeekHeader(Graphics g)
         {
             var culture = CultureInfo.CurrentCulture;
             var names = culture.DateTimeFormat.AbbreviatedDayNames;
             var first = culture.DateTimeFormat.FirstDayOfWeek;
 
-            using (var textBrush = new SolidBrush(Color.FromArgb(180, 180, 180)))
+            int contentWidth = ClientSize.Width - _vScrollBar.Width - ControlPadding * 2;
+            int cellW = Math.Max(30, contentWidth / 7);
+            var headerRect = new Rectangle(ControlPadding, ControlPadding, cellW * 7, DowHeight);
+
+            using (var headerBg = new SolidBrush(HeaderBackColor))
+            using (var textBrush = new SolidBrush(Color.FromArgb(200, 200, 200)))
             using (var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
             {
+                g.FillRectangle(headerBg, headerRect);
+
                 for (int i = 0; i < 7; i++)
                 {
                     int idx = ((int)first + i) % 7;
                     string label = names[idx].ToUpperInvariant();
-                    int w = rect.Width / 7;
-                    var cell = new Rectangle(rect.Left + i * w, rect.Top, (i == 6 ? rect.Right - (rect.Left + i * w) : w), rect.Height);
+                    var cell = new Rectangle(headerRect.Left + i * cellW, headerRect.Top, cellW, headerRect.Height);
                     g.DrawString(label, Font, textBrush, cell, sf);
                 }
             }
         }
 
-        private void DrawDateGrid(Graphics g, MonthLayout ml)
+        private void DrawWeekRow(Graphics g, WeekLayout wl)
         {
-            var first = new DateTime(ml.Month.Year, ml.Month.Month, 1);
-            int days = DateTime.DaysInMonth(ml.Month.Year, ml.Month.Month);
-            var culture = CultureInfo.CurrentCulture;
-            var fdow = culture.DateTimeFormat.FirstDayOfWeek;
-            int offset = ((int)first.DayOfWeek - (int)fdow + 7) % 7;
-
-            using (var todayPen = new Pen(TodayOutlineColor, 2f))
+            using (var borderPen = new Pen(GridLineColor))
             using (var textBrush = new SolidBrush(ForeColor))
             using (var mutedTextBrush = new SolidBrush(Color.FromArgb(170, 170, 170)))
             using (var highlightFill = new SolidBrush(HighlightFillColor))
             using (var hoverFill = new SolidBrush(Color.FromArgb(50, 50, 50)))
-            using (var sf = new StringFormat { Alignment = StringAlignment.Far, LineAlignment = StringAlignment.Near })
+            using (var todayPen = new Pen(TodayOutlineColor, 2f))
+            using (var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Near })
             {
-                // Numbers / highlights
-                for (int day = 1; day <= days; day++)
+                g.DrawRectangle(borderPen, wl.Bounds);
+
+                int cellW = wl.Bounds.Width / 7;
+
+                // Draw each day cell
+                for (int col = 0; col < 7; col++)
                 {
-                    int idx = (day - 1) + offset;
-                    int row = idx / 7; int col = idx % 7;
-                    var rect = new Rectangle(
-                        ml.GridBounds.Left + col * (ml.CellSize.Width + CellGap),
-                        ml.GridBounds.Top + row * (ml.CellSize.Height + CellGap),
-                        ml.CellSize.Width,
-                        ml.CellSize.Height);
+                    var date = wl.WeekStart.AddDays(col);
+                    var cellRect = new Rectangle(wl.Bounds.Left + col * cellW, wl.Bounds.Top, cellW, wl.Bounds.Height);
 
-                    var date = new DateTime(ml.Month.Year, ml.Month.Month, day);
+                    // Vertical separator
+                    if (col > 0)
+                        g.DrawLine(borderPen, cellRect.Left, cellRect.Top, cellRect.Left, cellRect.Bottom);
 
-                    // hover effect (drawn first, so other fills can overlay)
+                    // Hover fill
                     if (_hoverDate.HasValue && _hoverDate.Value == date)
                     {
-                        g.FillRectangle(hoverFill, rect);
+                        g.FillRectangle(hoverFill, cellRect);
                     }
 
-                    // highlight fill
+                    // Highlight fill
                     if (_highlighted.Contains(date))
                     {
-                        g.FillRectangle(highlightFill, rect);
+                        g.FillRectangle(highlightFill, cellRect);
                     }
 
-                    // date number
+                    // Date number
                     var brush = (date.DayOfWeek == DayOfWeek.Saturday || date.DayOfWeek == DayOfWeek.Sunday) ? mutedTextBrush : textBrush;
-                    var textRect = Rectangle.Inflate(rect, -4, -2);
-                    g.DrawString(day.ToString(CultureInfo.InvariantCulture), Font, brush, textRect, sf);
+                    var textRect = new Rectangle(cellRect.X + 4, cellRect.Y + 4, cellRect.Width - 8, 20);
+                    
+                    string dayText = date.Day.ToString(CultureInfo.InvariantCulture);
+                    if (date.Day == 1)
+                        dayText = date.ToString("MMM d", CultureInfo.CurrentCulture);
+                    
+                    g.DrawString(dayText, Font, brush, textRect, sf);
 
-                    // today outline
+                    // Today outline
                     if (date.Date == DateTime.Today)
                     {
-                        var inset = Rectangle.Inflate(rect, -2, -2);
+                        var inset = Rectangle.Inflate(cellRect, -2, -2);
                         g.DrawRectangle(todayPen, inset);
                     }
                 }
+
+                // Draw task bars
+                DrawTasksForWeek(g, wl);
             }
         }
 
-        private void DrawTasks(Graphics g, MonthLayout ml)
+        private void DrawTasksForWeek(Graphics g, WeekLayout wl)
         {
-            // Get visible date range for this month panel
-            var first = new DateTime(ml.Month.Year, ml.Month.Month, 1);
-            var last = new DateTime(ml.Month.Year, ml.Month.Month, DateTime.DaysInMonth(ml.Month.Year, ml.Month.Month));
+            var weekStart = wl.WeekStart;
+            var weekEnd = weekStart.AddDays(6);
 
-            foreach (var t in _tasks)
+            for (int taskIndex = 0; taskIndex < _tasks.Count; taskIndex++)
             {
-                var spanStart = (t.Start > first) ? t.Start : first;
-                var spanEnd = (t.End < last) ? t.End : last;
-                if (spanEnd < first || spanStart > last) continue; // no overlap
+                var t = _tasks[taskIndex];
+                if (t.End < weekStart || t.Start > weekEnd) continue;
+                if (wl.TaskRowsForWeek[taskIndex] < 0) continue;
 
-                // Iterate week by week across the month
+                int taskRow = wl.TaskRowsForWeek[taskIndex];
+
+                var segStart = t.Start > weekStart ? t.Start : weekStart;
+                var segEnd = t.End < weekEnd ? t.End : weekEnd;
+
+                int cellW = wl.Bounds.Width / 7;
                 var culture = CultureInfo.CurrentCulture;
                 var fdow = culture.DateTimeFormat.FirstDayOfWeek;
-                DateTime cursor = spanStart;
-                while (cursor <= spanEnd)
+
+                int startCol = ((int)segStart.DayOfWeek - (int)fdow + 7) % 7;
+                int endCol = ((int)segEnd.DayOfWeek - (int)fdow + 7) % 7;
+
+                int barTop = wl.Bounds.Bottom - wl.TaskAreaHeight + (taskRow * (TaskBarHeight + TaskBarSpacing)) + TaskBarSpacing;
+                var barRect = Rectangle.FromLTRB(
+                    wl.Bounds.Left + startCol * cellW + 2,
+                    barTop,
+                    wl.Bounds.Left + (endCol + 1) * cellW - 2,
+                    barTop + TaskBarHeight);
+
+                using (var barBrush = new SolidBrush(t.Color.IsEmpty ? TaskDefaultColor : t.Color))
+                using (var textBrush = new SolidBrush(Color.FromArgb(20, 20, 20)))
+                using (var sf = new StringFormat { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter })
                 {
-                    // Start of the week containing cursor
-                    int diff = ((int)cursor.DayOfWeek - (int)fdow + 7) % 7;
-                    var weekStart = cursor.AddDays(-diff).Date;
-                    var weekEnd = weekStart.AddDays(6);
+                    g.FillRectangle(barBrush, barRect);
 
-                    var segStart = cursor;
-                    var segEnd = (spanEnd < weekEnd) ? spanEnd : weekEnd;
-
-                    // Rect: from segStart col to segEnd col within the row for segStart
-                    var startRect = GetDateCellRect(ml, segStart);
-                    var endRect = GetDateCellRect(ml, segEnd);
-
-                    if (!startRect.IsEmpty && !endRect.IsEmpty)
+                    if (!string.IsNullOrEmpty(t.Text))
                     {
-                        var rowTop = startRect.Top + startRect.Height - 10; // position near bottom of cell
-                        var barRect = Rectangle.FromLTRB(startRect.Left + 2, rowTop, endRect.Right - 2, rowTop + 8);
+                        var textRect = Rectangle.Inflate(barRect, -4, -1);
+                        using (var small = new Font(Font, FontStyle.Bold))
+                            g.DrawString(t.Text, small, textBrush, textRect, sf);
+                    }
+                }
 
-                        using (var barBrush = new SolidBrush(t.Color.IsEmpty ? TaskDefaultColor : t.Color))
-                        using (var textBrush = new SolidBrush(Color.FromArgb(20, 20, 20)))
-                        using (var sf = new StringFormat { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter })
+                // Hover effect: darken the portion over the hovered date
+                if (_hoverDate.HasValue && _hoverDate.Value >= segStart && _hoverDate.Value <= segEnd)
+                {
+                    int hoverCol = ((int)_hoverDate.Value.DayOfWeek - (int)fdow + 7) % 7;
+                    var hoverBarRect = Rectangle.FromLTRB(
+                        wl.Bounds.Left + hoverCol * cellW,
+                        barRect.Top,
+                        wl.Bounds.Left + (hoverCol + 1) * cellW,
+                        barRect.Bottom);
+
+                    var clippedRect = Rectangle.Intersect(barRect, hoverBarRect);
+                    if (!clippedRect.IsEmpty)
+                    {
+                        using (var darkenBrush = new SolidBrush(Color.FromArgb(100, 0, 0, 0)))
                         {
-                            g.FillRectangle(barBrush, barRect);
-
-                            if (!string.IsNullOrEmpty(t.Text))
-                            {
-                                var textRect = Rectangle.Inflate(barRect, -4, -1);
-                                using (var small = new Font(Font, FontStyle.Bold))
-                                    g.DrawString(t.Text, small, textBrush, textRect, sf);
-                            }
-                        }
-
-                        // Hover effect: darken the portion of the task bar over the hovered date
-                        if (_hoverDate.HasValue && _hoverDate.Value >= segStart && _hoverDate.Value <= segEnd)
-                        {
-                            var hoverCellRect = GetDateCellRect(ml, _hoverDate.Value);
-                            if (!hoverCellRect.IsEmpty)
-                            {
-                                var hoverBarRect = Rectangle.FromLTRB(
-                                    Math.Max(barRect.Left, hoverCellRect.Left),
-                                    barRect.Top,
-                                    Math.Min(barRect.Right, hoverCellRect.Right),
-                                    barRect.Bottom);
-
-                                using (var darkenBrush = new SolidBrush(Color.FromArgb(100, 0, 0, 0)))
-                                {
-                                    g.FillRectangle(darkenBrush, hoverBarRect);
-                                }
-                            }
+                            g.FillRectangle(darkenBrush, clippedRect);
                         }
                     }
-
-                    cursor = segEnd.AddDays(1);
                 }
             }
         }
@@ -489,48 +531,41 @@ namespace CustomControls
                 DateClicked?.Invoke(this, new DateClickedEventArgs(date.Value, e.Button));
             }
 
-            // Task hit-test: rough — check if we clicked on any task bar
-            using (var g = CreateGraphics())
+            // Task hit-test
+            foreach (var wl in ComputeWeekLayouts())
             {
-                foreach (var ml in ComputeLayout(g))
+                if (!wl.Bounds.Contains(e.Location)) continue;
+
+                var weekStart = wl.WeekStart;
+                var weekEnd = weekStart.AddDays(6);
+                int cellW = wl.Bounds.Width / 7;
+                var culture = CultureInfo.CurrentCulture;
+                var fdow = culture.DateTimeFormat.FirstDayOfWeek;
+
+                for (int taskIndex = 0; taskIndex < _tasks.Count; taskIndex++)
                 {
-                    if (!ml.Bounds.Contains(e.Location)) continue;
+                    var t = _tasks[taskIndex];
+                    if (t.End < weekStart || t.Start > weekEnd) continue;
+                    if (wl.TaskRowsForWeek[taskIndex] < 0) continue;
 
-                    // Build rectangles for tasks (same as draw)
-                    var first = new DateTime(ml.Month.Year, ml.Month.Month, 1);
-                    var last = new DateTime(ml.Month.Year, ml.Month.Month, DateTime.DaysInMonth(ml.Month.Year, ml.Month.Month));
-                    var culture = CultureInfo.CurrentCulture;
-                    var fdow = culture.DateTimeFormat.FirstDayOfWeek;
+                    int taskRow = wl.TaskRowsForWeek[taskIndex];
+                    var segStart = t.Start > weekStart ? t.Start : weekStart;
+                    var segEnd = t.End < weekEnd ? t.End : weekEnd;
 
-                    foreach (var t in _tasks)
+                    int startCol = ((int)segStart.DayOfWeek - (int)fdow + 7) % 7;
+                    int endCol = ((int)segEnd.DayOfWeek - (int)fdow + 7) % 7;
+
+                    int barTop = wl.Bounds.Bottom - wl.TaskAreaHeight + (taskRow * (TaskBarHeight + TaskBarSpacing)) + TaskBarSpacing;
+                    var barRect = Rectangle.FromLTRB(
+                        wl.Bounds.Left + startCol * cellW + 2,
+                        barTop,
+                        wl.Bounds.Left + (endCol + 1) * cellW - 2,
+                        barTop + TaskBarHeight);
+
+                    if (barRect.Contains(e.Location))
                     {
-                        var spanStart = (t.Start > first) ? t.Start : first;
-                        var spanEnd = (t.End < last) ? t.End : last;
-                        if (spanEnd < first || spanStart > last) continue;
-
-                        DateTime cursor = spanStart;
-                        while (cursor <= spanEnd)
-                        {
-                            int diff = ((int)cursor.DayOfWeek - (int)fdow + 7) % 7;
-                            var weekStart = cursor.AddDays(-diff).Date;
-                            var weekEnd = weekStart.AddDays(6);
-                            var segStart = cursor;
-                            var segEnd = (spanEnd < weekEnd) ? spanEnd : weekEnd;
-
-                            var startRect = GetDateCellRect(ml, segStart);
-                            var endRect = GetDateCellRect(ml, segEnd);
-                            if (!startRect.IsEmpty && !endRect.IsEmpty)
-                            {
-                                var rowTop = startRect.Top + startRect.Height - 10;
-                                var barRect = Rectangle.FromLTRB(startRect.Left + 2, rowTop, endRect.Right - 2, rowTop + 8);
-                                if (barRect.Contains(e.Location))
-                                {
-                                    TaskClicked?.Invoke(this, new TaskClickedEventArgs(t));
-                                    return;
-                                }
-                            }
-                            cursor = segEnd.AddDays(1);
-                        }
+                        TaskClicked?.Invoke(this, new TaskClickedEventArgs(t));
+                        return;
                     }
                 }
             }
@@ -538,9 +573,8 @@ namespace CustomControls
 
         protected override bool IsInputKey(Keys keyData)
         {
-            // Allow arrow/pg keys for navigation
             var k = keyData & Keys.KeyCode;
-            return k == Keys.Left || k == Keys.Right || k == Keys.PageUp || k == Keys.PageDown || base.IsInputKey(keyData);
+            return k == Keys.Up || k == Keys.Down || k == Keys.PageUp || k == Keys.PageDown || base.IsInputKey(keyData);
         }
 
         protected override void OnKeyDown(KeyEventArgs e)
@@ -548,21 +582,41 @@ namespace CustomControls
             base.OnKeyDown(e);
             switch (e.KeyCode)
             {
-                case Keys.Left:
-                case Keys.PageUp:
-                    StartMonth = StartMonth.AddMonths(-1);
+                case Keys.Up:
+                    _scrollWeekOffset = Math.Max(0, _scrollWeekOffset - 1);
+                    UpdateScrollBar();
+                    Invalidate();
                     break;
-                case Keys.Right:
+                case Keys.Down:
+                    _scrollWeekOffset++;
+                    UpdateScrollBar();
+                    Invalidate();
+                    break;
+                case Keys.PageUp:
+                    _scrollWeekOffset = Math.Max(0, _scrollWeekOffset - _weeksToDisplay);
+                    UpdateScrollBar();
+                    Invalidate();
+                    break;
                 case Keys.PageDown:
-                    StartMonth = StartMonth.AddMonths(1);
+                    _scrollWeekOffset += _weeksToDisplay;
+                    UpdateScrollBar();
+                    Invalidate();
                     break;
             }
         }
 
         private void MultiMonthCalendar_MouseWheel(object sender, MouseEventArgs e)
         {
-            if (e.Delta > 0) StartMonth = StartMonth.AddMonths(-1);
-            else if (e.Delta < 0) StartMonth = StartMonth.AddMonths(1);
+            int delta = e.Delta / 120;
+            _scrollWeekOffset = Math.Max(0, _scrollWeekOffset - delta);
+            UpdateScrollBar();
+            Invalidate();
+        }
+
+        private void VScrollBar_Scroll(object sender, ScrollEventArgs e)
+        {
+            _scrollWeekOffset = e.NewValue;
+            Invalidate();
         }
 
         private void MultiMonthCalendar_MouseMove(object sender, MouseEventArgs e)
@@ -575,7 +629,6 @@ namespace CustomControls
 
                 if (_hoverDate.HasValue)
                 {
-                    // Build tooltip text: date + tasks that include it
                     var date = _hoverDate.Value;
                     var lines = new List<string> { date.ToString("D", CultureInfo.CurrentCulture) };
                     var relevant = _tasks.Where(t => t.Start <= date && t.End >= date && !string.IsNullOrEmpty(t.Text)).ToList();
@@ -593,6 +646,12 @@ namespace CustomControls
                     _tooltip.Hide(this);
                 }
             }
+        }
+
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            UpdateScrollBar();
         }
 
         #endregion

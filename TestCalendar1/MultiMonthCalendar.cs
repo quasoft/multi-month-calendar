@@ -25,6 +25,7 @@ namespace CustomControls
 
         private int _minWeekRowHeight = 40;
         private int _weeksToDisplay = 12;
+        private bool _autoCalculateWeeks = true;
 
         private DateTime _startDate = GetMondayOfWeek(DateTime.Today);
         private readonly HashSet<DateTime> _highlighted = new HashSet<DateTime>();
@@ -84,7 +85,14 @@ namespace CustomControls
         public int WeeksToDisplay
         {
             get => _weeksToDisplay;
-            set { _weeksToDisplay = Math.Max(1, value); UpdateScrollBar(); Invalidate(); }
+            set { _weeksToDisplay = Math.Max(1, value); _autoCalculateWeeks = false; UpdateScrollBar(); Invalidate(); }
+        }
+
+        [Category("Behavior"), Description("Automatically calculate number of weeks based on available height.")]
+        public bool AutoCalculateWeeks
+        {
+            get => _autoCalculateWeeks;
+            set { _autoCalculateWeeks = value; Invalidate(); }
         }
 
         [Category("Behavior"), Description("The first week's starting date (Monday).")]
@@ -207,6 +215,21 @@ namespace CustomControls
             public int MonthWeekSpan;
         }
 
+        private int CalculateWeeksToFit()
+        {
+            if (!_autoCalculateWeeks)
+                return _weeksToDisplay;
+
+            int availableHeight = ClientSize.Height - ControlPadding - DowHeight - ControlPadding;
+            if (availableHeight <= 0)
+                return 1;
+
+            // Estimate based on minimum row height
+            // We'll use a conservative estimate that accounts for potential task bars
+            int estimatedWeeks = availableHeight / (_minWeekRowHeight + 1); // +1 for separator
+            return Math.Max(1, estimatedWeeks);
+        }
+
         private List<int> AssignTaskRows()
         {
             var taskRows = new List<int>();
@@ -261,6 +284,8 @@ namespace CustomControls
             var layouts = new List<WeekLayout>();
             if (ClientSize.Width <= 0 || ClientSize.Height <= 0) return layouts;
 
+            int weeksToDisplay = CalculateWeeksToFit();
+            
             var taskRows = AssignTaskRows();
             int contentWidth = ClientSize.Width - _vScrollBar.Width - ControlPadding * 2 - MonthColumnWidth;
             int cellW = Math.Max(30, contentWidth / 7);
@@ -269,8 +294,9 @@ namespace CustomControls
             DateTime weekStart = _startDate.AddDays(_scrollWeekOffset * 7);
 
             Dictionary<string, List<int>> monthWeekIndices = new Dictionary<string, List<int>>();
+            int availableHeight = ClientSize.Height - ControlPadding - DowHeight;
 
-            for (int w = 0; w < _weeksToDisplay; w++)
+            for (int w = 0; w < weeksToDisplay; w++)
             {
                 var currentWeekStart = weekStart.AddDays(w * 7);
                 var currentWeekEnd = currentWeekStart.AddDays(6);
@@ -294,6 +320,13 @@ namespace CustomControls
                 int totalHeight = _minWeekRowHeight + taskAreaHeight;
 
                 var bounds = new Rectangle(ControlPadding + MonthColumnWidth, yPos, cellW * 7, totalHeight);
+
+                // Check if this week fits in available height
+                if (yPos + totalHeight - (ControlPadding + DowHeight) > availableHeight)
+                {
+                    // Stop adding weeks if we run out of space
+                    break;
+                }
 
                 // Find the first day in this week that is day 1-7 of a month to determine month ownership
                 DateTime? monthOwner = null;
@@ -398,9 +431,10 @@ namespace CustomControls
         {
             if (_vScrollBar == null) return;
             
+            int weeksToDisplay = CalculateWeeksToFit();
             int totalWeeks = 52;
-            _vScrollBar.Maximum = Math.Max(0, totalWeeks - _weeksToDisplay + _vScrollBar.LargeChange - 1);
-            _vScrollBar.LargeChange = Math.Max(1, _weeksToDisplay / 2);
+            _vScrollBar.Maximum = Math.Max(0, totalWeeks - weeksToDisplay + _vScrollBar.LargeChange - 1);
+            _vScrollBar.LargeChange = Math.Max(1, weeksToDisplay / 2);
             _vScrollBar.SmallChange = 1;
             _vScrollBar.Value = Math.Min(_scrollWeekOffset, _vScrollBar.Maximum);
         }
@@ -710,6 +744,7 @@ namespace CustomControls
         protected override void OnKeyDown(KeyEventArgs e)
         {
             base.OnKeyDown(e);
+            int weeksToDisplay = CalculateWeeksToFit();
             switch (e.KeyCode)
             {
                 case Keys.Up:
@@ -723,12 +758,12 @@ namespace CustomControls
                     Invalidate();
                     break;
                 case Keys.PageUp:
-                    _scrollWeekOffset = Math.Max(0, _scrollWeekOffset - _weeksToDisplay);
+                    _scrollWeekOffset = Math.Max(0, _scrollWeekOffset - weeksToDisplay);
                     UpdateScrollBar();
                     Invalidate();
                     break;
                 case Keys.PageDown:
-                    _scrollWeekOffset += _weeksToDisplay;
+                    _scrollWeekOffset += weeksToDisplay;
                     UpdateScrollBar();
                     Invalidate();
                     break;

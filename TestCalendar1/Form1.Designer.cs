@@ -38,6 +38,7 @@
             this.calendar.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
             | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
+            this.calendar.AutoCalculateWeeks = true;
             this.calendar.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(30)))), ((int)(((byte)(30)))), ((int)(((byte)(30)))));
             this.calendar.Font = new System.Drawing.Font("Segoe UI", 9F);
             this.calendar.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(230)))), ((int)(((byte)(230)))), ((int)(((byte)(230)))));
@@ -45,18 +46,17 @@
             this.calendar.HeaderBackColor = System.Drawing.Color.FromArgb(((int)(((byte)(45)))), ((int)(((byte)(45)))), ((int)(((byte)(45)))));
             this.calendar.HighlightFillColor = System.Drawing.Color.FromArgb(((int)(((byte)(60)))), ((int)(((byte)(120)))), ((int)(((byte)(255)))), ((int)(((byte)(60)))));
             this.calendar.Location = new System.Drawing.Point(16, 15);
-            this.calendar.Margin = new System.Windows.Forms.Padding(4);
+            this.calendar.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.calendar.MinWeekRowHeight = 40;
-            this.calendar.MonthBackColor1 = System.Drawing.Color.FromArgb(((int)(((byte)(45)))), ((int)(((byte)(45)))), ((int)(((byte)(45)))));
+            this.calendar.MonthBackColor1 = System.Drawing.Color.FromArgb(((int)(((byte)(35)))), ((int)(((byte)(35)))), ((int)(((byte)(35)))));
             this.calendar.MonthBackColor2 = System.Drawing.Color.FromArgb(((int)(((byte)(30)))), ((int)(((byte)(30)))), ((int)(((byte)(30)))));
             this.calendar.Name = "calendar";
             this.calendar.Size = new System.Drawing.Size(419, 918);
-            this.calendar.StartDate = new System.DateTime(2025, 9, 29, 0, 0, 0, 0);
+            this.calendar.StartDate = new System.DateTime(2025, 10, 1, 0, 0, 0, 0);
             this.calendar.TabIndex = 0;
             this.calendar.TaskDefaultColor = System.Drawing.Color.FromArgb(((int)(((byte)(90)))), ((int)(((byte)(150)))), ((int)(((byte)(255)))));
             this.calendar.Text = "multiMonthCalendar1";
             this.calendar.TodayOutlineColor = System.Drawing.Color.FromArgb(((int)(((byte)(90)))), ((int)(((byte)(150)))), ((int)(((byte)(255)))));
-            this.calendar.WeeksToDisplay = 12;
             // 
             // button1
             // 

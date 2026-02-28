@@ -355,25 +355,13 @@ namespace CustomControls
             var fdow = culture.DateTimeFormat.FirstDayOfWeek;
             int offset = ((int)first.DayOfWeek - (int)fdow + 7) % 7;
 
-            using (var gridPen = new Pen(GridLineColor))
             using (var todayPen = new Pen(TodayOutlineColor, 2f))
             using (var textBrush = new SolidBrush(ForeColor))
             using (var mutedTextBrush = new SolidBrush(Color.FromArgb(170, 170, 170)))
             using (var highlightFill = new SolidBrush(HighlightFillColor))
+            using (var hoverFill = new SolidBrush(Color.FromArgb(50, 50, 50)))
             using (var sf = new StringFormat { Alignment = StringAlignment.Far, LineAlignment = StringAlignment.Near })
             {
-                // Draw cells
-                for (int i = 0; i < 6; i++)
-                {
-                    for (int j = 0; j < 7; j++)
-                    {
-                        var x = ml.GridBounds.Left + j * (ml.CellSize.Width + CellGap);
-                        var y = ml.GridBounds.Top + i * (ml.CellSize.Height + CellGap);
-                        var rect = new Rectangle(x, y, ml.CellSize.Width, ml.CellSize.Height);
-                        g.DrawRectangle(gridPen, rect);
-                    }
-                }
-
                 // Numbers / highlights
                 for (int day = 1; day <= days; day++)
                 {
@@ -386,6 +374,12 @@ namespace CustomControls
                         ml.CellSize.Height);
 
                     var date = new DateTime(ml.Month.Year, ml.Month.Month, day);
+
+                    // hover effect (drawn first, so other fills can overlay)
+                    if (_hoverDate.HasValue && _hoverDate.Value == date)
+                    {
+                        g.FillRectangle(hoverFill, rect);
+                    }
 
                     // highlight fill
                     if (_highlighted.Contains(date))
@@ -403,15 +397,6 @@ namespace CustomControls
                     {
                         var inset = Rectangle.Inflate(rect, -2, -2);
                         g.DrawRectangle(todayPen, inset);
-                    }
-
-                    // hover effect
-                    if (_hoverDate.HasValue && _hoverDate.Value == date)
-                    {
-                        using (var hoverPen = new Pen(AccentColor))
-                        {
-                            g.DrawRectangle(hoverPen, Rectangle.Inflate(rect, -1, -1));
-                        }
                     }
                 }
             }
@@ -453,18 +438,35 @@ namespace CustomControls
                         var barRect = Rectangle.FromLTRB(startRect.Left + 2, rowTop, endRect.Right - 2, rowTop + 8);
 
                         using (var barBrush = new SolidBrush(t.Color.IsEmpty ? TaskDefaultColor : t.Color))
-                        using (var barPen = new Pen(Color.FromArgb(220, 220, 220), 1))
                         using (var textBrush = new SolidBrush(Color.FromArgb(20, 20, 20)))
                         using (var sf = new StringFormat { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter })
                         {
                             g.FillRectangle(barBrush, barRect);
-                            g.DrawRectangle(barPen, barRect);
 
                             if (!string.IsNullOrEmpty(t.Text))
                             {
                                 var textRect = Rectangle.Inflate(barRect, -4, -1);
                                 using (var small = new Font(Font, FontStyle.Bold))
                                     g.DrawString(t.Text, small, textBrush, textRect, sf);
+                            }
+                        }
+
+                        // Hover effect: darken the portion of the task bar over the hovered date
+                        if (_hoverDate.HasValue && _hoverDate.Value >= segStart && _hoverDate.Value <= segEnd)
+                        {
+                            var hoverCellRect = GetDateCellRect(ml, _hoverDate.Value);
+                            if (!hoverCellRect.IsEmpty)
+                            {
+                                var hoverBarRect = Rectangle.FromLTRB(
+                                    Math.Max(barRect.Left, hoverCellRect.Left),
+                                    barRect.Top,
+                                    Math.Min(barRect.Right, hoverCellRect.Right),
+                                    barRect.Bottom);
+
+                                using (var darkenBrush = new SolidBrush(Color.FromArgb(100, 0, 0, 0)))
+                                {
+                                    g.FillRectangle(darkenBrush, hoverBarRect);
+                                }
                             }
                         }
                     }

@@ -27,8 +27,14 @@ namespace TestCalendar1
                 end: new DateTime(2025, 11, 12),
                 text: "Sprint 24",
                 color: Color.FromArgb(0xFF, 0x6F, 0x00)
-            ); // optional
+            );
 
+            calendar.AddTask(
+                start: new DateTime(2025, 11, 3),
+                end: new DateTime(2025, 11, 14),
+                text: "Task 3",
+                color: Color.FromArgb(0x13, 0xFF, 0x2f)
+            );
         }
     }
 }

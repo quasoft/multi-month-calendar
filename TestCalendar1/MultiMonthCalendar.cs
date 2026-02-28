@@ -18,7 +18,6 @@ namespace CustomControls
     public class MultiMonthCalendar : Control
     {
         private const int DowHeight = 24;
-        private const int TaskBarHeight = 8;
         private const int TaskBarSpacing = 2;
         private const int ControlPadding = 10;
         private const int MonthColumnWidth = 50;
@@ -26,6 +25,9 @@ namespace CustomControls
         private int _minWeekRowHeight = 40;
         private int _weeksToDisplay = 12;
         private bool _autoCalculateWeeks = true;
+        private float _taskFontSize = 7f;
+        private int _taskBarHeight = 8;
+        private Font _taskBarFont = null;
 
         private DateTime _startDate = GetMondayOfWeek(DateTime.Today);
         private readonly HashSet<DateTime> _highlighted = new HashSet<DateTime>();
@@ -64,6 +66,24 @@ namespace CustomControls
             MouseLeave += (s, e) => { _hoverDate = null; _tooltip.Hide(this); Invalidate(); };
         }
 
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                if (_taskBarFont != null)
+                {
+                    _taskBarFont.Dispose();
+                    _taskBarFont = null;
+                }
+                if (_tooltip != null)
+                {
+                    _tooltip.Dispose();
+                    _tooltip = null;
+                }
+            }
+            base.Dispose(disposing);
+        }
+
         private static DateTime GetMondayOfWeek(DateTime date)
         {
             var culture = CultureInfo.CurrentCulture;
@@ -93,6 +113,35 @@ namespace CustomControls
         {
             get => _autoCalculateWeeks;
             set { _autoCalculateWeeks = value; Invalidate(); }
+        }
+
+        [Category("Appearance"), Description("Font size for task bar text.")]
+        public float TaskFontSize
+        {
+            get => _taskFontSize;
+            set { _taskFontSize = Math.Max(5f, Math.Min(12f, value)); Invalidate(); }
+        }
+
+        [Category("Appearance"), Description("Height of task bars in pixels.")]
+        public int TaskBarHeight
+        {
+            get => _taskBarHeight;
+            set { _taskBarHeight = Math.Max(6, Math.Min(20, value)); UpdateScrollBar(); Invalidate(); }
+        }
+
+        [Category("Appearance"), Description("Font used for task bar text. If not set, uses FontFamily with TaskFontSize.")]
+        public Font TaskBarFont
+        {
+            get => _taskBarFont;
+            set 
+            { 
+                if (_taskBarFont != null && _taskBarFont != value)
+                {
+                    _taskBarFont.Dispose();
+                }
+                _taskBarFont = value;
+                Invalidate(); 
+            }
         }
 
         [Category("Behavior"), Description("The first week's starting date (Monday).")]
@@ -316,7 +365,7 @@ namespace CustomControls
                     }
                 }
 
-                int taskAreaHeight = maxTaskRow >= 0 ? (maxTaskRow + 1) * (TaskBarHeight + TaskBarSpacing) : 0;
+                int taskAreaHeight = maxTaskRow >= 0 ? (maxTaskRow + 1) * (_taskBarHeight + TaskBarSpacing) : 0;
                 int totalHeight = _minWeekRowHeight + taskAreaHeight;
 
                 var bounds = new Rectangle(ControlPadding + MonthColumnWidth, yPos, cellW * 7, totalHeight);
@@ -639,12 +688,12 @@ namespace CustomControls
                 int startCol = ((int)segStart.DayOfWeek - (int)fdow + 7) % 7;
                 int endCol = ((int)segEnd.DayOfWeek - (int)fdow + 7) % 7;
 
-                int barTop = wl.Bounds.Bottom - wl.TaskAreaHeight + (taskRow * (TaskBarHeight + TaskBarSpacing)) + TaskBarSpacing;
+                int barTop = wl.Bounds.Bottom - wl.TaskAreaHeight + (taskRow * (_taskBarHeight + TaskBarSpacing)) + TaskBarSpacing;
                 var barRect = Rectangle.FromLTRB(
                     wl.Bounds.Left + startCol * cellW + 2,
                     barTop,
                     wl.Bounds.Left + (endCol + 1) * cellW - 2,
-                    barTop + TaskBarHeight);
+                    barTop + _taskBarHeight);
 
                 using (var barBrush = new SolidBrush(t.Color.IsEmpty ? TaskDefaultColor : t.Color))
                 using (var textBrush = new SolidBrush(Color.FromArgb(20, 20, 20)))
@@ -655,8 +704,18 @@ namespace CustomControls
                     if (!string.IsNullOrEmpty(t.Text))
                     {
                         var textRect = Rectangle.Inflate(barRect, -4, -1);
-                        using (var small = new Font(Font, FontStyle.Bold))
-                            g.DrawString(t.Text, small, textBrush, textRect, sf);
+                        Font fontToUse = _taskBarFont ?? new Font(Font.FontFamily, _taskFontSize, FontStyle.Bold);
+                        bool disposeFont = _taskBarFont == null;
+                        
+                        try
+                        {
+                            g.DrawString(t.Text, fontToUse, textBrush, textRect, sf);
+                        }
+                        finally
+                        {
+                            if (disposeFont && fontToUse != null)
+                                fontToUse.Dispose();
+                        }
                     }
                 }
 
@@ -719,12 +778,12 @@ namespace CustomControls
                     int startCol = ((int)segStart.DayOfWeek - (int)fdow + 7) % 7;
                     int endCol = ((int)segEnd.DayOfWeek - (int)fdow + 7) % 7;
 
-                    int barTop = wl.Bounds.Bottom - wl.TaskAreaHeight + (taskRow * (TaskBarHeight + TaskBarSpacing)) + TaskBarSpacing;
+                    int barTop = wl.Bounds.Bottom - wl.TaskAreaHeight + (taskRow * (_taskBarHeight + TaskBarSpacing)) + TaskBarSpacing;
                     var barRect = Rectangle.FromLTRB(
                         wl.Bounds.Left + startCol * cellW + 2,
                         barTop,
                         wl.Bounds.Left + (endCol + 1) * cellW - 2,
-                        barTop + TaskBarHeight);
+                        barTop + _taskBarHeight);
 
                     if (barRect.Contains(e.Location))
                     {

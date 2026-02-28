@@ -22,6 +22,9 @@ namespace TestCalendar1
         {
             calendar.AddHighlight(DateTime.Today);
 
+            // Example: Set a custom font for task bars
+            // calendar.TaskBarFont = new Font("Consolas", 7f, FontStyle.Bold);
+            
             calendar.AddTask(
                 start: new DateTime(2025, 11, 3),
                 end: new DateTime(2025, 11, 12),

@@ -45,11 +45,13 @@
             this.calendar.HeaderBackColor = System.Drawing.Color.FromArgb(((int)(((byte)(45)))), ((int)(((byte)(45)))), ((int)(((byte)(45)))));
             this.calendar.HighlightFillColor = System.Drawing.Color.FromArgb(((int)(((byte)(60)))), ((int)(((byte)(120)))), ((int)(((byte)(255)))), ((int)(((byte)(60)))));
             this.calendar.Location = new System.Drawing.Point(16, 15);
-            this.calendar.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.calendar.Margin = new System.Windows.Forms.Padding(4);
             this.calendar.MinWeekRowHeight = 40;
+            this.calendar.MonthBackColor1 = System.Drawing.Color.FromArgb(((int)(((byte)(45)))), ((int)(((byte)(45)))), ((int)(((byte)(45)))));
+            this.calendar.MonthBackColor2 = System.Drawing.Color.FromArgb(((int)(((byte)(30)))), ((int)(((byte)(30)))), ((int)(((byte)(30)))));
             this.calendar.Name = "calendar";
             this.calendar.Size = new System.Drawing.Size(419, 918);
-            this.calendar.StartDate = new System.DateTime(2025, 10, 1, 0, 0, 0, 0);
+            this.calendar.StartDate = new System.DateTime(2025, 9, 29, 0, 0, 0, 0);
             this.calendar.TabIndex = 0;
             this.calendar.TaskDefaultColor = System.Drawing.Color.FromArgb(((int)(((byte)(90)))), ((int)(((byte)(150)))), ((int)(((byte)(255)))));
             this.calendar.Text = "multiMonthCalendar1";
@@ -59,7 +61,7 @@
             // button1
             // 
             this.button1.Location = new System.Drawing.Point(644, 247);
-            this.button1.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.button1.Margin = new System.Windows.Forms.Padding(4);
             this.button1.Name = "button1";
             this.button1.Size = new System.Drawing.Size(100, 28);
             this.button1.TabIndex = 1;
@@ -74,7 +76,7 @@
             this.ClientSize = new System.Drawing.Size(1067, 948);
             this.Controls.Add(this.button1);
             this.Controls.Add(this.calendar);
-            this.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.Margin = new System.Windows.Forms.Padding(4);
             this.Name = "Form1";
             this.Text = "Form1";
             this.ResumeLayout(false);

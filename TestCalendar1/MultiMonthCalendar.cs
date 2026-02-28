@@ -21,6 +21,7 @@ namespace CustomControls
         private const int TaskBarHeight = 8;
         private const int TaskBarSpacing = 2;
         private const int ControlPadding = 10;
+        private const int MonthColumnWidth = 50;
 
         private int _minWeekRowHeight = 40;
         private int _weeksToDisplay = 12;
@@ -48,6 +49,8 @@ namespace CustomControls
             TodayOutlineColor = Color.FromArgb(90, 150, 255);
             HighlightFillColor = Color.FromArgb(60, 120, 255, 60);
             TaskDefaultColor = Color.FromArgb(90, 150, 255);
+            MonthBackColor1 = Color.FromArgb(35, 35, 35);
+            MonthBackColor2 = Color.FromArgb(30, 30, 30);
 
             _tooltip = new ToolTip { IsBalloon = false, UseFading = true, UseAnimation = true, AutoPopDelay = 8000, InitialDelay = 400, ReshowDelay = 200 };
 
@@ -109,6 +112,11 @@ namespace CustomControls
         [Category("Appearance"), Description("Fill for highlighted dates.")]
         public Color HighlightFillColor { get; set; }
 
+        [Category("Appearance"), Description("First alternating month background color.")]
+        public Color MonthBackColor1 { get; set; }
+
+        [Category("Appearance"), Description("Second alternating month background color.")]
+        public Color MonthBackColor2 { get; set; }
         public struct TaskSpan
         {
             public DateTime Start;
@@ -194,6 +202,9 @@ namespace CustomControls
             public int BaseHeight;
             public int TaskAreaHeight;
             public List<int> TaskRowsForWeek;
+            public Rectangle MonthColumnBounds;
+            public bool IsFirstWeekOfMonth;
+            public int MonthWeekSpan;
         }
 
         private List<int> AssignTaskRows()
@@ -251,18 +262,19 @@ namespace CustomControls
             if (ClientSize.Width <= 0 || ClientSize.Height <= 0) return layouts;
 
             var taskRows = AssignTaskRows();
-            int contentWidth = ClientSize.Width - _vScrollBar.Width - ControlPadding * 2;
+            int contentWidth = ClientSize.Width - _vScrollBar.Width - ControlPadding * 2 - MonthColumnWidth;
             int cellW = Math.Max(30, contentWidth / 7);
 
             int yPos = ControlPadding + DowHeight;
             DateTime weekStart = _startDate.AddDays(_scrollWeekOffset * 7);
+
+            Dictionary<string, List<int>> monthWeekIndices = new Dictionary<string, List<int>>();
 
             for (int w = 0; w < _weeksToDisplay; w++)
             {
                 var currentWeekStart = weekStart.AddDays(w * 7);
                 var currentWeekEnd = currentWeekStart.AddDays(6);
 
-                // Find max task row for this week
                 int maxTaskRow = -1;
                 var weekTaskIndices = new List<int>();
                 
@@ -281,7 +293,30 @@ namespace CustomControls
                 int taskAreaHeight = maxTaskRow >= 0 ? (maxTaskRow + 1) * (TaskBarHeight + TaskBarSpacing) : 0;
                 int totalHeight = _minWeekRowHeight + taskAreaHeight;
 
-                var bounds = new Rectangle(ControlPadding, yPos, cellW * 7, totalHeight);
+                var bounds = new Rectangle(ControlPadding + MonthColumnWidth, yPos, cellW * 7, totalHeight);
+
+                // Find the first day in this week that is day 1-7 of a month to determine month ownership
+                DateTime? monthOwner = null;
+                for (int day = 0; day < 7; day++)
+                {
+                    var checkDate = currentWeekStart.AddDays(day);
+                    if (checkDate.Day <= 7)
+                    {
+                        monthOwner = new DateTime(checkDate.Year, checkDate.Month, 1);
+                        break;
+                    }
+                }
+                
+                // If no day 1-7 found, use the first day of the week
+                if (!monthOwner.HasValue)
+                {
+                    monthOwner = new DateTime(currentWeekStart.Year, currentWeekStart.Month, 1);
+                }
+
+                string monthKey = monthOwner.Value.ToString("yyyy-MM");
+                if (!monthWeekIndices.ContainsKey(monthKey))
+                    monthWeekIndices[monthKey] = new List<int>();
+                monthWeekIndices[monthKey].Add(w);
 
                 layouts.Add(new WeekLayout
                 {
@@ -289,10 +324,36 @@ namespace CustomControls
                     Bounds = bounds,
                     BaseHeight = _minWeekRowHeight,
                     TaskAreaHeight = taskAreaHeight,
-                    TaskRowsForWeek = taskRows
+                    TaskRowsForWeek = taskRows,
+                    MonthColumnBounds = Rectangle.Empty,
+                    IsFirstWeekOfMonth = false,
+                    MonthWeekSpan = 0
                 });
 
                 yPos += totalHeight + 1;
+            }
+
+            // Calculate month column spans
+            foreach (var kvp in monthWeekIndices)
+            {
+                var weekIndices = kvp.Value;
+                if (weekIndices.Count == 0) continue;
+
+                int firstWeekIdx = weekIndices[0];
+                int lastWeekIdx = weekIndices[weekIndices.Count - 1];
+
+                var firstWeek = layouts[firstWeekIdx];
+                var lastWeek = layouts[lastWeekIdx];
+
+                int monthColTop = firstWeek.Bounds.Top;
+                int monthColBottom = lastWeek.Bounds.Bottom;
+                var monthColBounds = new Rectangle(ControlPadding, monthColTop, MonthColumnWidth, monthColBottom - monthColTop);
+
+                var updated = layouts[firstWeekIdx];
+                updated.IsFirstWeekOfMonth = true;
+                updated.MonthWeekSpan = weekIndices.Count;
+                updated.MonthColumnBounds = monthColBounds;
+                layouts[firstWeekIdx] = updated;
             }
 
             return layouts;
@@ -361,9 +422,62 @@ namespace CustomControls
             DrawDayOfWeekHeader(g);
 
             var layouts = ComputeWeekLayouts();
+            
+            // Draw month columns first
+            foreach (var wl in layouts)
+            {
+                if (wl.IsFirstWeekOfMonth)
+                {
+                    DrawMonthColumn(g, wl);
+                }
+            }
+
+            // Draw week rows
             foreach (var wl in layouts)
             {
                 DrawWeekRow(g, wl);
+            }
+        }
+
+        private void DrawMonthColumn(Graphics g, WeekLayout wl)
+        {
+            if (wl.MonthColumnBounds.IsEmpty) return;
+
+            // Use the first day 1-7 in the week to determine month
+            DateTime monthOwner = wl.WeekStart;
+            for (int day = 0; day < 7; day++)
+            {
+                var checkDate = wl.WeekStart.AddDays(day);
+                if (checkDate.Day <= 7)
+                {
+                    monthOwner = new DateTime(checkDate.Year, checkDate.Month, 1);
+                    break;
+                }
+            }
+
+            int monthIndex = monthOwner.Month - 1;
+            var bgColor = (monthIndex % 2 == 0) ? MonthBackColor1 : MonthBackColor2;
+
+            using (var monthBg = new SolidBrush(bgColor))
+            using (var borderPen = new Pen(GridLineColor))
+            using (var textBrush = new SolidBrush(ForeColor))
+            {
+                g.FillRectangle(monthBg, wl.MonthColumnBounds);
+                g.DrawRectangle(borderPen, wl.MonthColumnBounds);
+
+                string monthName = monthOwner.ToString("MMMM", CultureInfo.CurrentCulture).ToUpperInvariant();
+                
+                g.TranslateTransform(wl.MonthColumnBounds.Left + wl.MonthColumnBounds.Width / 2f, 
+                                    wl.MonthColumnBounds.Top + wl.MonthColumnBounds.Height / 2f);
+                g.RotateTransform(-90);
+                
+                using (var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+                using (var monthFont = new Font(Font.FontFamily, 10f, FontStyle.Bold))
+                {
+                    g.DrawString(monthName, monthFont, textBrush, 0, 0, sf);
+                }
+                
+                g.ResetTransform();
             }
         }
 
@@ -373,9 +487,9 @@ namespace CustomControls
             var names = culture.DateTimeFormat.AbbreviatedDayNames;
             var first = culture.DateTimeFormat.FirstDayOfWeek;
 
-            int contentWidth = ClientSize.Width - _vScrollBar.Width - ControlPadding * 2;
+            int contentWidth = ClientSize.Width - _vScrollBar.Width - ControlPadding * 2 - MonthColumnWidth;
             int cellW = Math.Max(30, contentWidth / 7);
-            var headerRect = new Rectangle(ControlPadding, ControlPadding, cellW * 7, DowHeight);
+            var headerRect = new Rectangle(ControlPadding + MonthColumnWidth, ControlPadding, cellW * 7, DowHeight);
 
             using (var headerBg = new SolidBrush(HeaderBackColor))
             using (var textBrush = new SolidBrush(Color.FromArgb(200, 200, 200)))
@@ -395,14 +509,32 @@ namespace CustomControls
 
         private void DrawWeekRow(Graphics g, WeekLayout wl)
         {
+            // Determine which month this week belongs to - use first day 1-7 in the week
+            DateTime monthOwner = wl.WeekStart;
+            for (int day = 0; day < 7; day++)
+            {
+                var checkDate = wl.WeekStart.AddDays(day);
+                if (checkDate.Day <= 7)
+                {
+                    monthOwner = new DateTime(checkDate.Year, checkDate.Month, 1);
+                    break;
+                }
+            }
+            
+            int monthIndex = monthOwner.Month - 1;
+            var monthBgColor = (monthIndex % 2 == 0) ? MonthBackColor1 : MonthBackColor2;
+
             using (var borderPen = new Pen(GridLineColor))
             using (var textBrush = new SolidBrush(ForeColor))
             using (var mutedTextBrush = new SolidBrush(Color.FromArgb(170, 170, 170)))
             using (var highlightFill = new SolidBrush(HighlightFillColor))
             using (var hoverFill = new SolidBrush(Color.FromArgb(50, 50, 50)))
             using (var todayPen = new Pen(TodayOutlineColor, 2f))
+            using (var monthBgBrush = new SolidBrush(monthBgColor))
             using (var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Near })
             {
+                // Draw month background
+                g.FillRectangle(monthBgBrush, wl.Bounds);
                 g.DrawRectangle(borderPen, wl.Bounds);
 
                 int cellW = wl.Bounds.Width / 7;
@@ -434,8 +566,6 @@ namespace CustomControls
                     var textRect = new Rectangle(cellRect.X + 4, cellRect.Y + 4, cellRect.Width - 8, 20);
                     
                     string dayText = date.Day.ToString(CultureInfo.InvariantCulture);
-                    if (date.Day == 1)
-                        dayText = date.ToString("MMM d", CultureInfo.CurrentCulture);
                     
                     g.DrawString(dayText, Font, brush, textRect, sf);
 
